@@ -1,0 +1,32 @@
+{
+  "business_name": "test",
+  "license_id": "LIC12345678",
+  "primary_zip_code": "11221",
+  "email": "test@gmail.com",
+  "labor_rate": 45.0,
+  "daily_productivity": 250,
+  "base_crew_size": 6,
+  "crew_scaling_rule": "size_only",
+  "slope_cost_adjustment": {
+    "flat_low": 0,
+    "moderate": 0.1,
+    "steep": 0.2,
+    "very_steep": 0.3
+  },
+  "material_costs": {
+    "asphalt": 4,
+    "shingle": 4.5,
+    "metal": 7,
+    "tile": 8,
+    "concrete": 6
+  },
+  "replacement_costs": {
+    "asphalt": 45,
+    "shingle": 50,
+    "metal": 90,
+    "tile": 70,
+    "concrete": 60
+  },
+  "overhead_percent": 0.1,
+  "profit_margin": 0.2
+}
