@@ -2,11 +2,13 @@ services:
   - type: web
     name: tileit-roofing-quotes
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --chdir backend tileit_app:app --bind 0.0.0.0:$PORT --workers 4 --timeout 120
+    region: oregon
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: gunicorn --chdir backend tileit_app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     envVars:
       - key: PYTHON_VERSION
-        value: 3.10.0
+        value: 3.11.0
       - key: FLASK_ENV
         value: production
     disk:
