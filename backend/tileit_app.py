@@ -30,13 +30,16 @@ CSV_DATA = None
 def load_csv_data():
     global CSV_DATA
     if CSV_DATA is None:
-        csv_path = "data/nearmap_synthetic_extended_correlated.csv"
+        # Get the absolute path relative to this file's directory
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        csv_path = os.path.join(base_dir, "data", "nearmap_synthetic_extended_correlated.csv")
+        print(f"Looking for CSV at: {csv_path}")
         if os.path.exists(csv_path):
             CSV_DATA = parse_nearmap_csv(csv_path)
-            print(f"Loaded {len(CSV_DATA)} properties from CSV")
+            print(f"✅ Loaded {len(CSV_DATA)} properties from CSV")
         else:
             CSV_DATA = []
-            print("No CSV data found")
+            print(f"❌ No CSV data found at {csv_path}")
 
 # Load data on startup
 load_csv_data()
@@ -598,11 +601,12 @@ def get_roofer_profile(user):
         if os.path.exists(profile_file):
             with open(profile_file, 'r') as f:
                 profile = json.load(f)
-                return jsonify({'success': True, 'profile': profile})
+                return jsonify({'success': True, 'profile': profile, 'profile_exists': True})
         else:
-            # Return default profile
+            # Return default profile with profile_exists = False
             return jsonify({
                 'success': True,
+                'profile_exists': False,
                 'profile': {
                     'labor_rate': 45,
                     'daily_productivity': 2500,
@@ -2939,12 +2943,15 @@ TILEIT_DASHBOARD_TEMPLATE = """
             } else if (section === 'properties') {
                 document.getElementById('dashboard').style.display = 'block';
                 document.querySelectorAll('.nav-item')[1].classList.add('active');
+            } else if (section === 'quotes') {
+                document.getElementById('dashboard').style.display = 'block';
+                document.querySelectorAll('.nav-item')[2].classList.add('active');
             } else if (section === 'settings') {
                 document.getElementById('settings').style.display = 'block';
-                document.querySelectorAll('.nav-item')[2].classList.add('active');
+                document.querySelectorAll('.nav-item')[3].classList.add('active');
             } else if (section === 'profile') {
                 document.getElementById('profile').style.display = 'block';
-                document.querySelectorAll('.nav-item')[3].classList.add('active');
+                document.querySelectorAll('.nav-item')[4].classList.add('active');
                 loadRooferProfile();
             }
             
@@ -3305,10 +3312,14 @@ TILEIT_DASHBOARD_TEMPLATE = """
                 if (result.success && result.profile) {
                     const profile = result.profile;
                     
-                    // Check if profile is complete
-                    const isComplete = profile.labor_rate && profile.daily_productivity && 
-                                      profile.base_crew_size && profile.overhead_percent && 
-                                      profile.profit_margin;
+                    // Check if profile is actually saved (not just default values)
+                    // A saved profile will have all required fields set to non-zero values
+                    const isComplete = result.profile_exists && 
+                                      profile.labor_rate && profile.labor_rate > 0 && 
+                                      profile.daily_productivity && profile.daily_productivity > 0 && 
+                                      profile.base_crew_size && profile.base_crew_size > 0 && 
+                                      profile.overhead_percent !== null && 
+                                      profile.profit_margin !== null;
                     
                     // Update profile status
                     const statusElement = document.getElementById('profileStatus');
