@@ -764,6 +764,112 @@ def get_quotes(user):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/quotes/saved', methods=['GET'])
+@require_auth
+def get_saved_quotes(user):
+    """Get all saved quotes for user"""
+    try:
+        quotes_file = f"quotes/{user['id']}_quotes.json"
+        if os.path.exists(quotes_file):
+            with open(quotes_file, 'r') as f:
+                quotes = json.load(f)
+            return jsonify({'success': True, 'quotes': quotes})
+        else:
+            return jsonify({'success': True, 'quotes': []})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/quotes/save', methods=['POST'])
+@require_auth
+def save_quote(user):
+    """Save a new quote"""
+    try:
+        data = request.json
+        print(f"📥 Backend received data: {data}")
+        print(f"📥 Data type: {type(data)}")
+        print(f"📥 Data keys: {data.keys() if data else 'None'}")
+        
+        # Validate required fields
+        required_fields = ['property_address', 'material', 'area', 'min_quote', 'max_quote']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'success': False, 'message': f'Missing required field: {field}'}), 400
+        
+        quotes_file = f"quotes/{user['id']}_quotes.json"
+        
+        # Load existing quotes
+        if os.path.exists(quotes_file):
+            with open(quotes_file, 'r') as f:
+                quotes = json.load(f)
+        else:
+            quotes = []
+        
+        # Check if quote already exists for this property
+        existing_quote = next((q for q in quotes if q['property_address'] == data['property_address']), None)
+        if existing_quote:
+            return jsonify({'success': False, 'message': 'Quote already exists for this property'}), 400
+        
+        # Create new quote
+        import uuid
+        import datetime
+        new_quote = {
+            'id': str(uuid.uuid4()),
+            'property_address': data['property_address'],
+            'material': data['material'],
+            'area': data['area'],
+            'min_quote': data['min_quote'],
+            'max_quote': data['max_quote'],
+            'crew_size': data.get('crew_size', 3),
+            'time_estimate': data.get('time_estimate', 0),
+            'notes': data.get('notes', ''),
+            'saved_date': datetime.datetime.now().isoformat()
+        }
+        
+        quotes.append(new_quote)
+        
+        # Ensure quotes directory exists
+        os.makedirs('quotes', exist_ok=True)
+        
+        # Save quotes
+        with open(quotes_file, 'w') as f:
+            json.dump(quotes, f, indent=2)
+        
+        return jsonify({'success': True, 'message': 'Quote saved successfully', 'quote': new_quote})
+    
+    except Exception as e:
+        print(f"Error saving quote: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/quotes/<quote_id>', methods=['DELETE'])
+@require_auth
+def delete_quote(user, quote_id):
+    """Delete a saved quote"""
+    try:
+        quotes_file = f"quotes/{user['id']}_quotes.json"
+        
+        if not os.path.exists(quotes_file):
+            return jsonify({'success': False, 'message': 'No quotes found'}), 404
+        
+        with open(quotes_file, 'r') as f:
+            quotes = json.load(f)
+        
+        # Filter out the quote to delete
+        original_length = len(quotes)
+        quotes = [q for q in quotes if q['id'] != quote_id]
+        
+        if len(quotes) == original_length:
+            return jsonify({'success': False, 'message': 'Quote not found'}), 404
+        
+        # Save updated quotes
+        with open(quotes_file, 'w') as f:
+            json.dump(quotes, f, indent=2)
+        
+        return jsonify({'success': True, 'message': 'Quote deleted successfully'})
+    
+    except Exception as e:
+        print(f"Error deleting quote: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/settings', methods=['GET'])
 @require_auth
 def get_settings(user):
@@ -980,7 +1086,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #fafafa;
             color: #1d1d1f;
             line-height: 1.47;
             min-height: 100vh;
@@ -994,13 +1100,12 @@ TILEIT_DASHBOARD_TEMPLATE = """
         
         /* Header */
         .header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: saturate(180%) blur(20px);
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+            background: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
             position: sticky;
             top: 0;
             z-index: 1000;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
         }
         
         .header-content {
@@ -1013,12 +1118,8 @@ TILEIT_DASHBOARD_TEMPLATE = """
         .logo {
             font-size: 28px;
             font-weight: 700;
-            color: #667eea;
+            color: #1d1d1f;
             text-decoration: none;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
         }
         
         .nav {
@@ -1038,13 +1139,13 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         .nav-item:hover {
-            color: #667eea;
-            background: rgba(102, 126, 234, 0.1);
+            color: #1d9bf0;
+            background: rgba(29, 155, 240, 0.1);
         }
         
         .nav-item.active {
-            color: #667eea;
-            background: rgba(102, 126, 234, 0.1);
+            color: #1d9bf0;
+            background: rgba(29, 155, 240, 0.1);
         }
         
         .user-menu {
@@ -1057,7 +1158,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: #1d9bf0;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1081,7 +1182,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         .btn-primary {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: #1d9bf0;
             color: white;
         }
         
@@ -1115,15 +1216,15 @@ TILEIT_DASHBOARD_TEMPLATE = """
         .auth-container {
             max-width: 450px;
             margin: 80px auto;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             overflow: hidden;
-            backdrop-filter: blur(20px);
+            border: 1px solid #e5e7eb;
         }
         
         .auth-header {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: #1d9bf0;
             padding: 32px;
             text-align: center;
             color: white;
@@ -1159,8 +1260,8 @@ TILEIT_DASHBOARD_TEMPLATE = """
         
         .auth-tab.active {
             background: white;
-            color: #667eea;
-            border-bottom: 3px solid #667eea;
+            color: #1d9bf0;
+            border-bottom: 3px solid #1d9bf0;
         }
         
         .auth-form {
@@ -1191,7 +1292,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
         
         .form-group input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #1d9bf0;
             box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
         }
         
@@ -1210,7 +1311,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         .forgot-password a {
-            color: #667eea;
+            color: #1d9bf0;
             text-decoration: none;
             font-size: 14px;
             font-weight: 500;
@@ -1230,23 +1331,19 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         .dashboard-header {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 40px;
-            margin-bottom: 32px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            backdrop-filter: blur(20px);
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
         }
         
         .dashboard-title {
-            font-size: 36px;
+            font-size: 32px;
             font-weight: 700;
             color: #1d1d1f;
-            margin-bottom: 12px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            margin-bottom: 8px;
         }
         
         .dashboard-subtitle {
@@ -1262,18 +1359,17 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         .stat-card {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 32px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            border-left: 6px solid #667eea;
-            backdrop-filter: blur(20px);
-            transition: all 0.3s ease;
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
+            transition: all 0.2s ease;
         }
         
         .stat-card:hover {
-            transform: translateY(-8px);
-            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.15);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            border-color: #1d9bf0;
         }
         
         .stat-card h3 {
@@ -1293,12 +1389,12 @@ TILEIT_DASHBOARD_TEMPLATE = """
         
         /* Filters */
         .filters-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            margin-bottom: 32px;
-            padding: 32px;
-            backdrop-filter: blur(20px);
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid #e5e7eb;
         }
         
         .filters-header {
@@ -1345,7 +1441,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
         .filter-group input:focus,
         .filter-group select:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #1d9bf0;
             box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
         }
         
@@ -1391,16 +1487,16 @@ TILEIT_DASHBOARD_TEMPLATE = """
         
         /* Properties Table */
         .properties-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            margin-bottom: 32px;
-            backdrop-filter: blur(20px);
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 24px;
+            border: 1px solid #e5e7eb;
         }
         
         .properties-header {
-            padding: 32px;
-            border-bottom: 1px solid #e9ecef;
+            padding: 20px 24px;
+            border-bottom: 1px solid #e5e7eb;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1436,13 +1532,19 @@ TILEIT_DASHBOARD_TEMPLATE = """
             color: #1d1d1f;
         }
         
-        .properties-table tr:hover {
-            background: rgba(102, 126, 234, 0.05);
+        .properties-table tbody tr {
+            transition: all 0.2s ease;
+        }
+        
+        .properties-table tbody tr:hover {
+            background: #eff6ff;
             cursor: pointer;
+            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.1);
+            transform: translateY(-2px);
         }
         
         .property-link {
-            color: #667eea;
+            color: #1d9bf0;
             text-decoration: none;
             font-weight: 500;
         }
@@ -1477,7 +1579,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         .modal-header {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: #1d9bf0;
             color: white;
             padding: 24px 32px;
             border-radius: 20px 20px 0 0;
@@ -1527,8 +1629,8 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         .pagination button:hover:not(:disabled) {
-            border-color: #667eea;
-            color: #667eea;
+            border-color: #1d9bf0;
+            color: #1d9bf0;
         }
         
         .pagination button:disabled {
@@ -1537,9 +1639,9 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         .pagination .active {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: #1d9bf0;
             color: white;
-            border-color: #667eea;
+            border-color: #1d9bf0;
         }
         
         /* Loading */
@@ -1552,7 +1654,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
         
         .spinner {
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
+            border-top: 4px solid #1d9bf0;
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -1930,7 +2032,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         .footer-link:hover {
-            color: #667eea;
+            color: #1d9bf0;
         }
         
         .footer-bottom {
@@ -1996,8 +2098,364 @@ TILEIT_DASHBOARD_TEMPLATE = """
         }
         
         *:focus-visible {
-            outline: 3px solid #667eea;
+            outline: 3px solid #1d9bf0;
             outline-offset: 2px;
+        }
+        
+        /* Property Details Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: slideUp 0.3s ease-out;
+        }
+        
+        @keyframes slideUp {
+            from {
+                transform: translateY(30px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .modal-header {
+            padding: 24px 32px;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+            color: #1d1d1f;
+        }
+        
+        .btn-close {
+            background: none;
+            border: none;
+            font-size: 32px;
+            color: #6c757d;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        
+        .btn-close:hover {
+            background: #f8f9fa;
+            color: #1d1d1f;
+        }
+        
+        .modal-body {
+            padding: 32px;
+        }
+        
+        .property-details-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 32px;
+        }
+        
+        .detail-section {
+            background: #ffffff;
+            padding: 0;
+            border-radius: 0;
+        }
+        
+        .detail-section h3 {
+            margin: 0 0 20px 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: #1d1d1f;
+        }
+        
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        
+        .detail-label {
+            font-weight: 500;
+            color: #6c757d;
+        }
+        
+        .detail-value {
+            font-weight: 600;
+            color: #1d1d1f;
+        }
+        
+        /* New Modern Info Item Styling */
+        .info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 14px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .info-item:last-child {
+            border-bottom: none;
+        }
+        
+        .info-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .info-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #111827;
+        }
+        
+        .quote-summary {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        
+        .quote-range {
+            background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
+            padding: 24px;
+            border-radius: 12px;
+            color: white;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+        }
+        
+        .quote-range h4 {
+            margin: 0 0 16px 0;
+            font-size: 16px;
+            font-weight: 500;
+            opacity: 0.9;
+        }
+        
+        .quote-amounts {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .quote-amount {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .amount-label {
+            font-size: 12px;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+        
+        .amount-value {
+            font-size: 28px;
+            font-weight: 700;
+        }
+        
+        .modal-footer {
+            padding: 20px 32px;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        
+        /* Property Analysis Section */
+        .analysis-section {
+            padding: 24px 32px;
+            background: #f9fafb;
+            border-top: 1px solid #e5e7eb;
+        }
+        
+        .analysis-section h3 {
+            margin: 0 0 20px 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: #111827;
+        }
+        
+        .analysis-content {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .analysis-item {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .analysis-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .analysis-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            width: fit-content;
+        }
+        
+        .status-excellent {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .status-good {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .status-fair {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .status-poor {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .analysis-list {
+            margin: 0;
+            padding-left: 20px;
+            color: #374151;
+            line-height: 1.6;
+        }
+        
+        .analysis-list li {
+            margin: 6px 0;
+        }
+        
+        /* Shimmer Loader */
+        @keyframes shimmer {
+            0% {
+                background-position: -1000px 0;
+            }
+            100% {
+                background-position: 1000px 0;
+            }
+        }
+        
+        .shimmer {
+            animation: shimmer 2s infinite linear;
+            background: linear-gradient(to right, #f0f0f0 8%, #e0e0e0 18%, #f0f0f0 33%);
+            background-size: 1000px 100%;
+        }
+        
+        .loading-shimmer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9998;
+        }
+        
+        .shimmer-box {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        
+        .shimmer-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #e5e7eb;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .shimmer-text {
+            font-size: 16px;
+            font-weight: 500;
+            color: #374151;
+        }
+        
+        /* Fade animations for modals */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideUp {
+            from {
+                transform: translateY(30px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
         }
         
         /* Responsive */
@@ -2021,6 +2479,21 @@ TILEIT_DASHBOARD_TEMPLATE = """
             .nav-item {
                 font-size: 14px;
                 padding: 6px 12px;
+            }
+            
+            .property-details-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .modal-content {
+                width: 95%;
+                max-height: 95vh;
+            }
+            
+            .modal-header,
+            .modal-body,
+            .modal-footer {
+                padding: 16px 20px;
             }
         }
     </style>
@@ -2122,26 +2595,46 @@ TILEIT_DASHBOARD_TEMPLATE = """
             </div>
         </div>
         
-        <!-- Dashboard Section -->
+        <!-- Dashboard Section (Stats Only) -->
         <div id="dashboard" class="dashboard">
             <div class="dashboard-header">
                 <div class="dashboard-title">Business Dashboard</div>
-                <div class="dashboard-subtitle">Manage your roofing quotes and business settings</div>
+                <div class="dashboard-subtitle">Overview of your roofing business metrics</div>
             </div>
             
             <div class="stats-grid">
                 <div class="stat-card">
                     <h3>Available Properties</h3>
                     <div class="number" id="totalProperties">0</div>
+                    <p style="font-size: 14px; color: #6c757d; margin-top: 8px;">Properties in database</p>
                 </div>
                 <div class="stat-card">
-                    <h3>Generated Quotes</h3>
+                    <h3>Saved Quotes</h3>
                     <div class="number" id="totalQuotes">0</div>
+                    <p style="font-size: 14px; color: #6c757d; margin-top: 8px;">Quotes you've saved</p>
                 </div>
                 <div class="stat-card" id="profileStatusCard" style="cursor: pointer;" onclick="handleProfileStatusClick()">
                     <h3>Profile Status</h3>
                     <div id="profileStatus">Incomplete</div>
+                    <p style="font-size: 14px; color: #6c757d; margin-top: 8px;">Click to complete</p>
                 </div>
+            </div>
+            
+            <div class="filters-container">
+                <h3 style="margin-bottom: 16px; color: #1d1d1f;">Quick Actions</h3>
+                <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                    <button class="btn btn-primary" onclick="showSection('properties')">Browse Properties</button>
+                    <button class="btn btn-primary" onclick="showSection('quotes')">View Saved Quotes</button>
+                    <button class="btn btn-secondary" onclick="showSection('profile')">Update Profile</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Properties Section -->
+        <div id="properties" class="dashboard" style="display: none;">
+            <div class="dashboard-header">
+                <div class="dashboard-title">Property Browser</div>
+                <div class="dashboard-subtitle">Browse and filter 25,000+ properties</div>
             </div>
             
             <!-- Filters Section -->
@@ -2164,6 +2657,11 @@ TILEIT_DASHBOARD_TEMPLATE = """
                         <label>Material Type</label>
                         <select id="filterMaterial">
                             <option value="">All Materials</option>
+                            <option value="asphalt">Asphalt</option>
+                            <option value="shingle">Shingle</option>
+                            <option value="metal">Metal</option>
+                            <option value="tile">Tile</option>
+                            <option value="concrete">Concrete</option>
                         </select>
                     </div>
                     
@@ -2205,7 +2703,6 @@ TILEIT_DASHBOARD_TEMPLATE = """
                     <div class="properties-title">Properties</div>
                     <div style="display: flex; gap: 16px; align-items: center;">
                         <div id="propertiesStats" style="color: #6c757d; font-size: 16px;"></div>
-                        <button class="btn btn-primary" onclick="generateAllQuotes()" style="padding: 10px 20px;">Generate All Quotes</button>
                     </div>
                 </div>
                 
@@ -2220,6 +2717,30 @@ TILEIT_DASHBOARD_TEMPLATE = """
                     <button onclick="previousPage()" id="prevPageBtn">Previous</button>
                     <span id="pageInfo">Page 1 of 1</span>
                     <button onclick="nextPage()" id="nextPageBtn">Next</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Saved Quotes Section -->
+        <div id="quotes" class="dashboard" style="display: none;">
+            <div class="dashboard-header">
+                <div class="dashboard-title">Saved Quotes</div>
+                <div class="dashboard-subtitle">View and manage your saved property quotes</div>
+            </div>
+            
+            <div class="properties-container">
+                <div class="properties-header">
+                    <div class="properties-title">Your Saved Quotes</div>
+                    <div style="display: flex; gap: 16px; align-items: center;">
+                        <div id="savedQuotesStats" style="color: #6c757d; font-size: 16px;"></div>
+                    </div>
+                </div>
+                
+                <div id="savedQuotesTable">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading saved quotes...
+                    </div>
                 </div>
             </div>
         </div>
@@ -2936,16 +3457,19 @@ TILEIT_DASHBOARD_TEMPLATE = """
             document.querySelectorAll('.dashboard').forEach(el => el.style.display = 'none');
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             
-            // Show selected section
+            // Show selected section and load data
             if (section === 'dashboard') {
                 document.getElementById('dashboard').style.display = 'block';
                 document.querySelectorAll('.nav-item')[0].classList.add('active');
+                // Dashboard loads stats automatically on init
             } else if (section === 'properties') {
-                document.getElementById('dashboard').style.display = 'block';
+                document.getElementById('properties').style.display = 'block';
                 document.querySelectorAll('.nav-item')[1].classList.add('active');
+                loadProperties(); // Load properties when viewing this page
             } else if (section === 'quotes') {
-                document.getElementById('dashboard').style.display = 'block';
+                document.getElementById('quotes').style.display = 'block';
                 document.querySelectorAll('.nav-item')[2].classList.add('active');
+                loadSavedQuotes(); // Load saved quotes
             } else if (section === 'settings') {
                 document.getElementById('settings').style.display = 'block';
                 document.querySelectorAll('.nav-item')[3].classList.add('active');
@@ -3104,55 +3628,6 @@ TILEIT_DASHBOARD_TEMPLATE = """
             container.innerHTML = tableHTML;
         }
         
-        async function showPropertyDetails(address) {
-            try {
-                const propertyId = address.replace(/ /g, '_').toLowerCase();
-                const response = await fetch(`/api/properties/${propertyId}`, {
-                    headers: {'Authorization': 'Bearer ' + authToken}
-                });
-                const result = await response.json();
-                
-                if (result.success) {
-                    const prop = result.property;
-                    const modalBody = document.getElementById('modalBody');
-                    
-                    modalBody.innerHTML = `
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-                            <div>
-                                <h4 style="margin-bottom: 16px; color: #1d1d1f;">Property Information</h4>
-                                <p><strong>Address:</strong> ${prop.address}</p>
-                                <p><strong>Material:</strong> ${prop.roof_material || 'N/A'}</p>
-                                <p><strong>Area:</strong> ${prop.roof_area ? prop.roof_area.toFixed(0) + ' sqft' : 'N/A'}</p>
-                                <p><strong>Pitch:</strong> ${prop.avg_pitch ? prop.avg_pitch.toFixed(1) + '°' : (prop.pitch ? prop.pitch.toFixed(1) + '°' : 'N/A')}</p>
-                                <p><strong>Condition Score:</strong> ${prop.avg_condition ? prop.avg_condition.toFixed(1) : (prop['roof condition summary score'] || 'N/A')}</p>
-                                <p><strong>Height:</strong> ${prop.avg_height ? prop.avg_height.toFixed(1) + ' ft' : (prop['height (ft)'] ? prop['height (ft)'].toFixed(1) + ' ft' : 'N/A')}</p>
-                                <p><strong>Roof Layers:</strong> ${prop.roof_layers || 1}</p>
-                            </div>
-                            <div>
-                                <h4 style="margin-bottom: 16px; color: #1d1d1f;">Additional Details</h4>
-                                ${prop.roof_layers > 1 ? `
-                                    <p><strong>All Pitches:</strong> ${prop.all_pitches ? prop.all_pitches.map(p => p.toFixed(1) + '°').join(', ') : 'N/A'}</p>
-                                    <p><strong>All Conditions:</strong> ${prop.all_conditions ? prop.all_conditions.map(c => c.toFixed(1)).join(', ') : 'N/A'}</p>
-                                    <p><strong>All Heights:</strong> ${prop.all_heights ? prop.all_heights.map(h => h.toFixed(1) + ' ft').join(', ') : 'N/A'}</p>
-                                    <p><strong>All Materials:</strong> ${prop.all_materials ? prop.all_materials.join(', ') : 'N/A'}</p>
-                                ` : ''}
-                                <p><strong>Capture Date:</strong> ${prop['capture date'] || 'N/A'}</p>
-                                <p><strong>Building Type:</strong> ${prop.building || 'N/A'}</p>
-                                <p><strong>Stories:</strong> ${prop['num stories'] || 'N/A'}</p>
-                            </div>
-                        </div>
-                    `;
-                    
-                    document.getElementById('propertyModal').style.display = 'block';
-                }
-            } catch (error) {
-                console.error('Error loading property details:', error);
-            }
-        }
-        
-        function closeModal() {
-            document.getElementById('propertyModal').style.display = 'none';
-        }
         
         function updatePropertiesPagination(pagination) {
             const container = document.getElementById('propertiesPagination');
@@ -3180,6 +3655,439 @@ TILEIT_DASHBOARD_TEMPLATE = """
         function nextPage() {
             currentPage++;
             loadProperties(currentPage);
+        }
+        
+        // Load Saved Quotes
+        async function loadSavedQuotes() {
+            try {
+                const response = await fetch('/api/quotes/saved', {
+                    headers: {'Authorization': 'Bearer ' + authToken}
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    savedQuotesArray = result.quotes; // Store globally
+                    document.getElementById('totalQuotes').textContent = result.quotes.length;
+                    document.getElementById('savedQuotesStats').textContent = 
+                        `${result.quotes.length} saved ${result.quotes.length === 1 ? 'quote' : 'quotes'}`;
+                    displaySavedQuotes(result.quotes);
+                } else {
+                    savedQuotesArray = [];
+                    document.getElementById('savedQuotesTable').innerHTML = '<div class="loading">No saved quotes yet.</div>';
+                }
+            } catch (error) {
+                console.error('Error loading saved quotes:', error);
+                savedQuotesArray = [];
+                document.getElementById('savedQuotesTable').innerHTML = '<div class="loading">No saved quotes yet. Browse properties to create some!</div>';
+            }
+        }
+        
+        function displaySavedQuotes(quotes) {
+            const container = document.getElementById('savedQuotesTable');
+            
+            if (quotes.length === 0) {
+                container.innerHTML = '<div class="loading">No saved quotes yet. Browse properties and click "Save Quote" to add them here!</div>';
+                return;
+            }
+            
+            const tableHTML = `
+                <table class="properties-table">
+                    <thead>
+                        <tr>
+                            <th>Property Address</th>
+                            <th>Material</th>
+                            <th>Area (sqft)</th>
+                            <th>Quote Range</th>
+                            <th>Saved On</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${quotes.map((quote, index) => `
+                            <tr>
+                                <td>${quote.property_address || 'N/A'}</td>
+                                <td>${quote.material || 'N/A'}</td>
+                                <td>${quote.area ? Math.round(quote.area) : 'N/A'}</td>
+                                <td>$${quote.min_quote ? Math.round(quote.min_quote).toLocaleString() : 'N/A'} - $${quote.max_quote ? Math.round(quote.max_quote).toLocaleString() : 'N/A'}</td>
+                                <td>${quote.saved_date ? new Date(quote.saved_date).toLocaleDateString() : 'N/A'}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary" onclick="viewSavedQuoteDetails(${index})">View Details</button>
+                                    <button class="btn btn-sm btn-secondary" onclick="deleteSavedQuote('${quote.id}')" style="margin-left: 8px;">Delete</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            
+            container.innerHTML = tableHTML;
+        }
+        
+        // Show Property Details Modal
+        function showLoadingShimmer(text = 'Loading...') {
+            const shimmerHTML = `
+                <div id="loadingShimmer" class="loading-shimmer">
+                    <div class="shimmer-box">
+                        <div class="shimmer-spinner"></div>
+                        <div class="shimmer-text">${text}</div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', shimmerHTML);
+        }
+        
+        function hideLoadingShimmer() {
+            const shimmer = document.getElementById('loadingShimmer');
+            if (shimmer) shimmer.remove();
+        }
+        
+        async function showPropertyDetails(address) {
+            try {
+                showLoadingShimmer('Loading property details...');
+                
+                // Find the property data
+                const params = new URLSearchParams({ search: address, per_page: 1 });
+                const response = await fetch(`/api/properties?${params}`, {
+                    headers: {'Authorization': 'Bearer ' + authToken}
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (!result.success || result.properties.length === 0) {
+                    hideLoadingShimmer();
+                    showToast('Property not found', 'error');
+                    return;
+                }
+                
+                const property = result.properties[0];
+                
+                // Update shimmer text
+                hideLoadingShimmer();
+                showLoadingShimmer('Generating quote...');
+                
+                // Generate quote for this property
+                const quoteResponse = await fetch('/api/quotes/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + authToken,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        addresses: [property.address]
+                    })
+                });
+                
+                hideLoadingShimmer();
+                
+                if (!quoteResponse.ok) {
+                    throw new Error(`Quote calculation failed! status: ${quoteResponse.status}`);
+                }
+                
+                const quoteResult = await quoteResponse.json();
+                
+                if (!quoteResult.success || !quoteResult.quotes || quoteResult.quotes.length === 0) {
+                    showToast('Failed to generate quote', 'error');
+                    return;
+                }
+                
+                const quote = quoteResult.quotes[0];
+                showPropertyModal(property, quote);
+                
+            } catch (error) {
+                hideLoadingShimmer();
+                console.error('Error loading property details:', error);
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+        
+        function generatePropertyAnalysis(property, quote) {
+            const condition = property.avg_condition || property['roof condition summary score'] || 75;
+            const pitch = property.avg_pitch || property.pitch || 20;
+            const layers = property.roof_layers || 1;
+            
+            // Condition Category
+            let conditionCategory, conditionClass;
+            if (condition >= 80) {
+                conditionCategory = 'Excellent';
+                conditionClass = 'status-excellent';
+            } else if (condition >= 60) {
+                conditionCategory = 'Good';
+                conditionClass = 'status-good';
+            } else if (condition >= 40) {
+                conditionCategory = 'Fair';
+                conditionClass = 'status-fair';
+            } else {
+                conditionCategory = 'Poor';
+                conditionClass = 'status-poor';
+            }
+            
+            // Issues & Recommendations
+            let issues = [];
+            let recommendations = [];
+            
+            if (condition < 50) {
+                issues.push('Low condition score indicates potential damage');
+                recommendations.push('Schedule inspection within 3 months');
+                recommendations.push('Consider full roof replacement');
+            } else if (condition < 70) {
+                issues.push('Moderate wear detected');
+                recommendations.push('Schedule inspection within 6 months');
+                recommendations.push('Monitor for leaks or damage');
+            }
+            
+            if (pitch > 30) {
+                issues.push('Steep pitch requires specialized crew');
+                recommendations.push('Use safety equipment and experienced crew');
+            }
+            
+            if (layers > 1) {
+                issues.push(`Multiple layers (${layers}) may require removal`);
+                recommendations.push('Factor in additional removal costs');
+            }
+            
+            if (issues.length === 0) {
+                issues.push('No major issues detected');
+            }
+            if (recommendations.length === 0) {
+                recommendations.push('Standard maintenance schedule recommended');
+            }
+            
+            return `
+                <div class="analysis-item">
+                    <span class="analysis-label">Condition Category</span>
+                    <span class="analysis-badge ${conditionClass}">${conditionCategory} (${condition.toFixed(1)}/100)</span>
+                </div>
+                <div class="analysis-item">
+                    <span class="analysis-label">Potential Issues</span>
+                    <ul class="analysis-list">
+                        ${issues.map(issue => `<li>${issue}</li>`).join('')}
+                    </ul>
+                </div>
+                <div class="analysis-item">
+                    <span class="analysis-label">Recommended Actions</span>
+                    <ul class="analysis-list">
+                        ${recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+        
+        // Store current property and quote globally for save function
+        let currentPropertyData = null;
+        let currentQuoteData = null;
+        let savedQuotesArray = [];
+        
+        function showPropertyModal(property, quote) {
+            // Store in global variables
+            currentPropertyData = property;
+            currentQuoteData = quote;
+            
+            const modalHTML = `
+                <div id="propertyModal" class="modal-overlay" onclick="closePropertyModal(event)">
+                    <div class="modal-content" onclick="event.stopPropagation()">
+                        <div class="modal-header">
+                            <h2>Property Details</h2>
+                            <button class="btn-close" onclick="closePropertyModal()">×</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="property-details-grid">
+                                <div class="detail-section">
+                                    <h3>Property Information</h3>
+                                    <div class="info-item">
+                                        <span class="info-label">Address</span>
+                                        <span class="info-value">${property.address || 'N/A'}</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="info-label">Roof Material</span>
+                                        <span class="info-value">${property.roof_material ? property.roof_material.charAt(0).toUpperCase() + property.roof_material.slice(1) : 'N/A'}</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="info-label">Roof Area</span>
+                                        <span class="info-value">${property.roof_area ? property.roof_area.toFixed(0) + ' sqft' : 'N/A'}</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="info-label">Pitch</span>
+                                        <span class="info-value">${property.avg_pitch ? property.avg_pitch.toFixed(1) : (property.pitch ? property.pitch.toFixed(1) : 'N/A')}°</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="info-label">Condition Score</span>
+                                        <span class="info-value">${property.avg_condition ? property.avg_condition.toFixed(1) : (property['roof condition summary score'] || 'N/A')}/100</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="info-label">Height</span>
+                                        <span class="info-value">${property.avg_height ? property.avg_height.toFixed(1) : (property['height (ft)'] ? property['height (ft)'].toFixed(1) : 'N/A')} ft</span>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="info-label">Roof Layers</span>
+                                        <span class="info-value">${property.roof_layers || 1}</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="detail-section">
+                                    <h3>Quote Details</h3>
+                                    <div class="quote-summary">
+                                        <div class="quote-range">
+                                            <h4>Estimated Cost Range</h4>
+                                            <div class="quote-amounts">
+                                                <div class="quote-amount">
+                                                    <span class="amount-label">Minimum</span>
+                                                    <span class="amount-value">$${quote.min_quote ? Math.round(quote.min_quote).toLocaleString() : 'N/A'}</span>
+                                                </div>
+                                                <div class="quote-amount">
+                                                    <span class="amount-label">Maximum</span>
+                                                    <span class="amount-value">$${quote.max_quote ? Math.round(quote.max_quote).toLocaleString() : 'N/A'}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="info-item">
+                                            <span class="info-label">Recommended Crew Size</span>
+                                            <span class="info-value">${quote.crew_size_used || 'N/A'} workers</span>
+                                        </div>
+                                        ${quote.notes ? `
+                                        <div class="detail-row">
+                                            <span class="detail-label">Notes:</span>
+                                            <span class="detail-value">${quote.notes}</span>
+                                        </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Property Analysis Section -->
+                            <div class="analysis-section">
+                                <h3>🔍 Property Analysis</h3>
+                                <div class="analysis-content">
+                                    ${generatePropertyAnalysis(property, quote)}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closePropertyModal()">Close</button>
+                            <button class="btn btn-primary" onclick="saveCurrentQuote()">Save Quote</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+        }
+        
+        function closePropertyModal(event) {
+            if (!event || event.target.classList.contains('modal-overlay')) {
+                const modal = document.getElementById('propertyModal');
+                if (modal) modal.remove();
+            }
+        }
+        
+        // Function to save the currently displayed property quote
+        async function saveCurrentQuote() {
+            if (!currentPropertyData || !currentQuoteData) {
+                showToast('No quote data available', 'error');
+                return;
+            }
+            
+            console.log('💾 Saving quote...');
+            console.log('Current Property Data:', currentPropertyData);
+            console.log('Current Quote Data:', currentQuoteData);
+            
+            // Build the payload
+            const payload = {
+                property_address: currentPropertyData.address || currentPropertyData.Address || currentPropertyData['Address'] || 'Unknown',
+                material: currentPropertyData.roof_material || currentPropertyData.Material || currentPropertyData['Roof Material'] || 'Unknown',
+                area: currentPropertyData.roof_area || currentPropertyData.Area || currentPropertyData['Area (sqft)'] || 0,
+                min_quote: currentQuoteData.min_quote,
+                max_quote: currentQuoteData.max_quote,
+                crew_size: currentQuoteData.crew_size_used || 3,
+                time_estimate: 0,
+                notes: currentQuoteData.estimated_quote_range || ''
+            };
+            
+            console.log('📤 Payload being sent:', payload);
+            
+            try {
+                const response = await fetch('/api/quotes/save', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + authToken,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast('Quote saved successfully!', 'success');
+                    closePropertyModal();
+                    // Refresh saved quotes count
+                    loadSavedQuotes();
+                } else {
+                    showToast(result.message || 'Failed to save quote', 'error');
+                }
+            } catch (error) {
+                console.error('Error saving quote:', error);
+                showToast('Error saving quote', 'error');
+            }
+        }
+        
+        // Legacy function for saved quotes view
+        async function saveQuote(property, quote) {
+            currentPropertyData = property;
+            currentQuoteData = quote;
+            await saveCurrentQuote();
+        }
+        
+        function viewSavedQuoteDetails(index) {
+            const quote = savedQuotesArray[index];
+            if (!quote) {
+                showToast('Quote not found', 'error');
+                return;
+            }
+            
+            // Reconstruct property and quote objects from saved quote
+            const property = {
+                address: quote.property_address,
+                roof_material: quote.material,
+                roof_area: quote.area
+            };
+            
+            const quoteData = {
+                min_quote: quote.min_quote,
+                max_quote: quote.max_quote,
+                crew_size_used: quote.crew_size,
+                estimated_quote_range: quote.notes
+            };
+            
+            showPropertyModal(property, quoteData);
+        }
+        
+        async function deleteSavedQuote(quoteId) {
+            if (!confirm('Are you sure you want to delete this quote?')) return;
+            
+            console.log('Deleting quote with ID:', quoteId);
+            
+            try {
+                const response = await fetch(`/api/quotes/${quoteId}`, {
+                    method: 'DELETE',
+                    headers: {'Authorization': 'Bearer ' + authToken}
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast('Quote deleted successfully', 'success');
+                    loadSavedQuotes();
+                } else {
+                    showToast('Failed to delete quote', 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting quote:', error);
+                showToast('Error deleting quote', 'error');
+            }
         }
         
         function applyFilters() {
