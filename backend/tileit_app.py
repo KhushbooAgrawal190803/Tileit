@@ -671,7 +671,7 @@ def generate_quotes(user):
         profile_file = f"profiles/{user['id']}_roofer_profile.json"
         if not os.path.exists(profile_file):
             print(f"ERROR: Profile file not found at {profile_file}")
-            return jsonify({'error': 'Please complete your business profile first'}), 400
+            return jsonify({'error': 'Please complete the business profile to generate quotes'}), 400
         
         with open(profile_file, 'r') as f:
             profile_data = json.load(f)
@@ -773,6 +773,18 @@ def get_saved_quotes(user):
         if os.path.exists(quotes_file):
             with open(quotes_file, 'r') as f:
                 quotes = json.load(f)
+
+            # Ensure each saved quote has an id; backfill if missing
+            changed = False
+            for q in quotes:
+                if 'id' not in q or not q.get('id'):
+                    import uuid
+                    q['id'] = str(uuid.uuid4())
+                    changed = True
+            if changed:
+                with open(quotes_file, 'w') as f:
+                    json.dump(quotes, f, indent=2)
+
             return jsonify({'success': True, 'quotes': quotes})
         else:
             return jsonify({'success': True, 'quotes': []})
@@ -824,6 +836,12 @@ def save_quote(user):
             'notes': data.get('notes', ''),
             'saved_date': datetime.datetime.now().isoformat()
         }
+
+        # Optional snapshots allow richer details in Saved Quotes view
+        if 'property_snapshot' in data:
+            new_quote['property_snapshot'] = data['property_snapshot']
+        if 'quote_snapshot' in data:
+            new_quote['quote_snapshot'] = data['quote_snapshot']
         
         quotes.append(new_quote)
         
@@ -3784,6 +3802,16 @@ TILEIT_DASHBOARD_TEMPLATE = """
                 hideLoadingShimmer();
                 
                 if (!quoteResponse.ok) {
+                    // Prefer friendly message when profile is missing
+                    if (quoteResponse.status === 400) {
+                        try {
+                            const errJson = await quoteResponse.json();
+                            const msg = errJson && (errJson.error || errJson.message);
+                            if (msg) throw new Error(msg);
+                        } catch (_) {
+                            // fallthrough to generic
+                        }
+                    }
                     throw new Error(`Quote calculation failed! status: ${quoteResponse.status}`);
                 }
                 
@@ -4003,7 +4031,10 @@ TILEIT_DASHBOARD_TEMPLATE = """
                 max_quote: currentQuoteData.max_quote,
                 crew_size: currentQuoteData.crew_size_used || 3,
                 time_estimate: 0,
-                notes: currentQuoteData.estimated_quote_range || ''
+                notes: currentQuoteData.estimated_quote_range || '',
+                // snapshots for rich Saved Quotes details
+                property_snapshot: currentPropertyData,
+                quote_snapshot: currentQuoteData
             };
             
             console.log('📤 Payload being sent:', payload);
@@ -4049,13 +4080,14 @@ TILEIT_DASHBOARD_TEMPLATE = """
             }
             
             // Reconstruct property and quote objects from saved quote
-            const property = {
+            // Prefer stored snapshots; fall back to minimal fields
+            const property = quote.property_snapshot ? quote.property_snapshot : {
                 address: quote.property_address,
                 roof_material: quote.material,
                 roof_area: quote.area
             };
             
-            const quoteData = {
+            const quoteData = quote.quote_snapshot ? quote.quote_snapshot : {
                 min_quote: quote.min_quote,
                 max_quote: quote.max_quote,
                 crew_size_used: quote.crew_size,
