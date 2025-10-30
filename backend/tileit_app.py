@@ -728,13 +728,13 @@ def generate_quotes(user):
             for err in errors[:5]:  # Show first 5 errors
                 print(f"  - {err}")
         
-        # Save quotes to file
+        # Save generated quotes to a separate file to avoid clobbering saved quotes
         os.makedirs('quotes', exist_ok=True)
-        quotes_file = f"quotes/{user['id']}_quotes.json"
-        with open(quotes_file, 'w') as f:
+        generated_file = f"quotes/{user['id']}_generated.json"
+        with open(generated_file, 'w') as f:
             json.dump(quotes, f, indent=2)
         
-        print(f"Saved quotes to: {quotes_file}\n")
+        print(f"Saved generated quotes to: {generated_file}\n")
         
         return jsonify({
             'success': True,
@@ -754,9 +754,10 @@ def generate_quotes(user):
 def get_quotes(user):
     """Get saved quotes"""
     try:
-        quotes_file = f"quotes/{user['id']}_quotes.json"
-        if os.path.exists(quotes_file):
-            with open(quotes_file, 'r') as f:
+        # Return last generated quotes (transient), not saved list
+        generated_file = f"quotes/{user['id']}_generated.json"
+        if os.path.exists(generated_file):
+            with open(generated_file, 'r') as f:
                 quotes = json.load(f)
             return jsonify({'success': True, 'quotes': quotes})
         else:
@@ -769,23 +770,48 @@ def get_quotes(user):
 def get_saved_quotes(user):
     """Get all saved quotes for user"""
     try:
-        quotes_file = f"quotes/{user['id']}_quotes.json"
+        quotes_file = f"quotes/{user['id']}_saved.json"
         if os.path.exists(quotes_file):
             with open(quotes_file, 'r') as f:
                 quotes = json.load(f)
 
-            # Ensure each saved quote has an id; backfill if missing
+            # Normalize legacy entries to avoid "N/A" rows; prefer fixing over dropping
+            import uuid, datetime
+            normalized: list = []
             changed = False
-            for q in quotes:
-                if 'id' not in q or not q.get('id'):
-                    import uuid
+            for q in quotes if isinstance(quotes, list) else []:
+                if not isinstance(q, dict):
+                    changed = True
+                    continue
+                # backfill id
+                if not q.get('id'):
                     q['id'] = str(uuid.uuid4())
                     changed = True
+                # Ensure we have a property_address; if missing, try to infer from snapshot
+                prop_addr = q.get('property_address')
+                if not prop_addr and isinstance(q.get('property_snapshot'), dict):
+                    snap_addr = q['property_snapshot'].get('address')
+                    if snap_addr:
+                        q['property_address'] = snap_addr
+                        changed = True
+                # If still missing address, keep but it will render as N/A; don't drop
+                # ensure saved_date
+                if not q.get('saved_date'):
+                    q['saved_date'] = datetime.datetime.now().isoformat()
+                    changed = True
+                normalized.append(q)
+
+            # Sort newest first for a stable UX
+            try:
+                normalized.sort(key=lambda x: x.get('saved_date', ''), reverse=True)
+            except Exception:
+                pass
+
             if changed:
                 with open(quotes_file, 'w') as f:
-                    json.dump(quotes, f, indent=2)
+                    json.dump(normalized, f, indent=2)
 
-            return jsonify({'success': True, 'quotes': quotes})
+            return jsonify({'success': True, 'quotes': normalized})
         else:
             return jsonify({'success': True, 'quotes': []})
     except Exception as e:
@@ -801,23 +827,39 @@ def save_quote(user):
         print(f"📥 Data type: {type(data)}")
         print(f"📥 Data keys: {data.keys() if data else 'None'}")
         
-        # Validate required fields
+        # Validate required fields and non-empty values
         required_fields = ['property_address', 'material', 'area', 'min_quote', 'max_quote']
         for field in required_fields:
-            if field not in data:
+            if field not in data or data.get(field) in (None, '', []):
                 return jsonify({'success': False, 'message': f'Missing required field: {field}'}), 400
         
-        quotes_file = f"quotes/{user['id']}_quotes.json"
+        quotes_file = f"quotes/{user['id']}_saved.json"
         
         # Load existing quotes
         if os.path.exists(quotes_file):
             with open(quotes_file, 'r') as f:
                 quotes = json.load(f)
+            # Normalize legacy entries to avoid KeyError on missing fields
+            changed = False
+            for q in quotes:
+                if isinstance(q, dict):
+                    if 'id' not in q or not q.get('id'):
+                        import uuid
+                        q['id'] = str(uuid.uuid4())
+                        changed = True
+                    # Ensure expected keys exist (used by list rendering and duplicate detection)
+                    for key in ['property_address', 'material', 'area', 'min_quote', 'max_quote', 'crew_size', 'time_estimate', 'notes', 'saved_date']:
+                        if key not in q:
+                            q[key] = None
+                            changed = True
+            if changed:
+                with open(quotes_file, 'w') as f:
+                    json.dump(quotes, f, indent=2)
         else:
             quotes = []
         
         # Check if quote already exists for this property
-        existing_quote = next((q for q in quotes if q['property_address'] == data['property_address']), None)
+        existing_quote = next((q for q in quotes if isinstance(q, dict) and q.get('property_address') == data.get('property_address')), None)
         if existing_quote:
             return jsonify({'success': False, 'message': 'Quote already exists for this property'}), 400
         
@@ -863,7 +905,8 @@ def save_quote(user):
 def delete_quote(user, quote_id):
     """Delete a saved quote"""
     try:
-        quotes_file = f"quotes/{user['id']}_quotes.json"
+        quotes_file = f"quotes/{user['id']}_saved.json"
+        quotes_file = f"quotes/{user['id']}_saved.json"
         
         if not os.path.exists(quotes_file):
             return jsonify({'success': False, 'message': 'No quotes found'}), 404
@@ -3721,19 +3764,27 @@ TILEIT_DASHBOARD_TEMPLATE = """
                         </tr>
                     </thead>
                     <tbody>
-                        ${quotes.map((quote, index) => `
-                            <tr>
-                                <td>${quote.property_address || 'N/A'}</td>
-                                <td>${quote.material || 'N/A'}</td>
-                                <td>${quote.area ? Math.round(quote.area) : 'N/A'}</td>
-                                <td>$${quote.min_quote ? Math.round(quote.min_quote).toLocaleString() : 'N/A'} - $${quote.max_quote ? Math.round(quote.max_quote).toLocaleString() : 'N/A'}</td>
-                                <td>${quote.saved_date ? new Date(quote.saved_date).toLocaleDateString() : 'N/A'}</td>
+                        ${quotes.map((quote, index) => {
+                            const addr = (quote.property_snapshot && quote.property_snapshot.address) || quote.property_address || 'N/A';
+                            const material = (quote.property_snapshot && (quote.property_snapshot.roof_material || quote.property_snapshot.material)) || quote.material || 'N/A';
+                            const areaVal = (quote.property_snapshot && (quote.property_snapshot.roof_area || quote.property_snapshot.area)) || quote.area;
+                            const area = areaVal ? Math.round(areaVal) : 'N/A';
+                            const minQ = (quote.quote_snapshot && quote.quote_snapshot.min_quote) || quote.min_quote;
+                            const maxQ = (quote.quote_snapshot && quote.quote_snapshot.max_quote) || quote.max_quote;
+                            const savedOn = quote.saved_date ? new Date(quote.saved_date).toLocaleDateString() : 'N/A';
+                            return `
+                              <tr>
+                                <td>${addr}</td>
+                                <td>${material}</td>
+                                <td>${area}</td>
+                                <td>$${minQ ? Math.round(minQ).toLocaleString() : 'N/A'} - $${maxQ ? Math.round(maxQ).toLocaleString() : 'N/A'}</td>
+                                <td>${savedOn}</td>
                                 <td>
-                                    <button class="btn btn-sm btn-primary" onclick="viewSavedQuoteDetails(${index})">View Details</button>
-                                    <button class="btn btn-sm btn-secondary" onclick="deleteSavedQuote('${quote.id}')" style="margin-left: 8px;">Delete</button>
+                                  <button class="btn btn-sm btn-primary" onclick="viewSavedQuoteDetails(${index})">View Details</button>
+                                  <button class="btn btn-sm btn-secondary" onclick="deleteSavedQuote('${quote.id}')" style="margin-left: 8px;">Delete</button>
                                 </td>
-                            </tr>
-                        `).join('')}
+                              </tr>`;
+                        }).join('')}
                     </tbody>
                 </table>
             `;
