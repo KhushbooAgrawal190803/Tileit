@@ -3,7 +3,7 @@ Tileit - Professional Roofing Quote Generator
 Modular, scalable application with advanced features
 """
 
-from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, send_file
 from flask_cors import CORS
 import os
 import json
@@ -17,9 +17,10 @@ import math
 from datetime import datetime, timedelta
 import sqlite3
 
-from models.roofer_profile import RooferProfile, SlopeCostAdjustment, MaterialCosts, ReplacementCosts, CrewScalingRule
+from models.roofer_profile import RooferProfile, SlopeCostAdjustment, MaterialCosts, ReplacementCosts, CrewScalingRule, QuoteResult
 from quote_engine import calculate_quote, process_csv_quotes
 from utils import parse_nearmap_csv, save_quotes_to_json
+from pdf_generator import EstimatePDFGenerator, generate_pdf_for_quote
 
 app = Flask(__name__)
 CORS(app)
@@ -64,6 +65,7 @@ class TileitAuth:
                 business_name TEXT NOT NULL,
                 license_id TEXT NOT NULL,
                 primary_zip_code TEXT NOT NULL,
+                phone TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 last_login TEXT NOT NULL,
                 is_active BOOLEAN DEFAULT 1,
@@ -71,6 +73,12 @@ class TileitAuth:
                 reset_token_expires TEXT
             )
         ''')
+        
+        # Add phone column if it doesn't exist (for existing databases)
+        try:
+            cursor.execute('ALTER TABLE users ADD COLUMN phone TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         
         # Create sessions table
         cursor.execute('''
@@ -102,7 +110,7 @@ class TileitAuth:
         return secrets.token_urlsafe(32)
     
     def create_user(self, email: str, password: str, business_name: str, 
-                   license_id: str, primary_zip_code: str) -> Optional[Dict]:
+                   license_id: str, primary_zip_code: str, phone: str) -> Optional[Dict]:
         """Create new user account"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -121,9 +129,9 @@ class TileitAuth:
             
             # Insert user
             cursor.execute('''
-                INSERT INTO users (id, email, password_hash, business_name, license_id, primary_zip_code, created_at, last_login)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (user_id, email, password_hash, business_name, license_id, primary_zip_code, now, now))
+                INSERT INTO users (id, email, password_hash, business_name, license_id, primary_zip_code, phone, created_at, last_login)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (user_id, email, password_hash, business_name, license_id, primary_zip_code, phone, now, now))
             
             conn.commit()
             
@@ -133,6 +141,7 @@ class TileitAuth:
                 'business_name': business_name,
                 'license_id': license_id,
                 'primary_zip_code': primary_zip_code,
+                'phone': phone,
                 'created_at': now,
                 'last_login': now
             }
@@ -150,7 +159,7 @@ class TileitAuth:
         
         try:
             cursor.execute('''
-                SELECT id, email, password_hash, business_name, license_id, primary_zip_code, created_at, last_login, is_active
+                SELECT id, email, password_hash, business_name, license_id, primary_zip_code, phone, created_at, last_login, is_active
                 FROM users WHERE email = ? AND is_active = 1
             ''', (email,))
             
@@ -158,7 +167,7 @@ class TileitAuth:
             if not row:
                 return None
             
-            user_id, email, password_hash, business_name, license_id, primary_zip_code, created_at, last_login, is_active = row
+            user_id, email, password_hash, business_name, license_id, primary_zip_code, phone, created_at, last_login, is_active = row
             
             if self.verify_password(password, password_hash):
                 # Update last login
@@ -172,6 +181,7 @@ class TileitAuth:
                     'business_name': business_name,
                     'license_id': license_id,
                     'primary_zip_code': primary_zip_code,
+                    'phone': phone,
                     'created_at': created_at,
                     'last_login': now,
                     'is_active': bool(is_active)
@@ -219,7 +229,7 @@ class TileitAuth:
             # Check session validity
             cursor.execute('''
                 SELECT s.user_id, s.expires_at, u.id, u.email, u.password_hash, u.business_name, 
-                       u.license_id, u.primary_zip_code, u.created_at, u.last_login, u.is_active
+                       u.license_id, u.primary_zip_code, u.phone, u.created_at, u.last_login, u.is_active
                 FROM sessions s
                 JOIN users u ON s.user_id = u.id
                 WHERE s.token = ? AND s.expires_at > ? AND u.is_active = 1
@@ -229,7 +239,7 @@ class TileitAuth:
             if not row:
                 return None
             
-            user_id, expires_at, id, email, password_hash, business_name, license_id, primary_zip_code, created_at, last_login, is_active = row
+            user_id, expires_at, id, email, password_hash, business_name, license_id, primary_zip_code, phone, created_at, last_login, is_active = row
             
             return {
                 'id': id,
@@ -237,6 +247,7 @@ class TileitAuth:
                 'business_name': business_name,
                 'license_id': license_id,
                 'primary_zip_code': primary_zip_code,
+                'phone': phone,
                 'created_at': created_at,
                 'last_login': last_login,
                 'is_active': bool(is_active)
@@ -434,7 +445,7 @@ def register():
         data = request.get_json()
         
         # Validate required fields
-        required_fields = ['email', 'password', 'business_name', 'license_id', 'primary_zip_code']
+        required_fields = ['email', 'password', 'business_name', 'license_id', 'primary_zip_code', 'phone']
         for field in required_fields:
             if not data.get(field):
                 return jsonify({'error': f'Missing required field: {field}'}), 400
@@ -445,7 +456,8 @@ def register():
             password=data['password'],
             business_name=data['business_name'],
             license_id=data['license_id'],
-            primary_zip_code=data['primary_zip_code']
+            primary_zip_code=data['primary_zip_code'],
+            phone=data['phone']
         )
         
         if not user:
@@ -930,6 +942,168 @@ def delete_quote(user, quote_id):
     except Exception as e:
         print(f"Error deleting quote: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/quotes/<quote_id>/pdf', methods=['GET'])
+@require_auth
+def generate_quote_pdf(user, quote_id):
+    """Generate PDF for a single quote"""
+    try:
+        # Get optional client info from query params
+        client_name = request.args.get('client_name')
+        client_phone = request.args.get('client_phone')
+        client_email = request.args.get('client_email')
+        
+        # Load roofer profile
+        profile_file = f"profiles/{user['id']}_roofer_profile.json"
+        if not os.path.exists(profile_file):
+            return jsonify({'error': 'Roofer profile not found'}), 404
+        
+        with open(profile_file, 'r') as f:
+            profile_data = json.load(f)
+        
+        roofer = RooferProfile.from_dict(profile_data)
+        
+        # Try to find quote in saved quotes first
+        quotes_file = f"quotes/{user['id']}_saved.json"
+        quote_dict = None
+        
+        if os.path.exists(quotes_file):
+            with open(quotes_file, 'r') as f:
+                saved_quotes = json.load(f)
+            
+            # Find quote by ID
+            for q in saved_quotes:
+                if q.get('id') == quote_id:
+                    quote_dict = q.get('property_snapshot') or q
+                    break
+        
+        # If not found in saved, try generated quotes
+        if not quote_dict:
+            generated_file = f"quotes/{user['id']}_generated.json"
+            if os.path.exists(generated_file):
+                with open(generated_file, 'r') as f:
+                    generated_quotes = json.load(f)
+                
+                # Try to find by index or search
+                try:
+                    idx = int(quote_id)
+                    if 0 <= idx < len(generated_quotes):
+                        quote_dict = generated_quotes[idx]
+                except ValueError:
+                    # Search by address hash
+                    for q in generated_quotes:
+                        if str(abs(hash(q.get('address', ''))) % 10000) == quote_id:
+                            quote_dict = q
+                            break
+        
+        if not quote_dict:
+            return jsonify({'error': 'Quote not found'}), 404
+        
+        # Convert to QuoteResult object
+        # Handle both QuoteResult format and raw property data
+        if 'address' in quote_dict and 'total' in quote_dict:
+            # Already a QuoteResult-like dict
+            quote = QuoteResult(**quote_dict)
+        else:
+            # Need to calculate quote from property data
+            quote = calculate_quote(quote_dict, roofer)
+        
+        # Generate PDF
+        output_dir = "pdfs"
+        
+        pdf_path = generate_pdf_for_quote(
+            quote=quote,
+            roofer=roofer,
+            output_dir=output_dir,
+            client_name=client_name,
+            client_phone=client_phone,
+            client_email=client_email,
+            roofer_phone=user.get('phone', 'N/A')
+        )
+        
+        # Ensure absolute path and verify file exists
+        pdf_path = os.path.abspath(pdf_path)
+        if not os.path.exists(pdf_path):
+            return jsonify({'error': f'PDF file not found at: {pdf_path}'}), 500
+        
+        # Return PDF file
+        return send_file(
+            pdf_path,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f"Roofing_Estimate_{quote_id}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        )
+        
+    except Exception as e:
+        print(f"Error generating PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/quotes/generate-pdf', methods=['POST'])
+@require_auth
+def generate_pdf_from_data(user):
+    """Generate PDF from quote data sent in request body"""
+    try:
+        data = request.get_json()
+        
+        if 'quote' not in data:
+            return jsonify({'error': 'quote data required'}), 400
+        
+        # Load roofer profile
+        profile_file = f"profiles/{user['id']}_roofer_profile.json"
+        if not os.path.exists(profile_file):
+            return jsonify({'error': 'Roofer profile not found'}), 404
+        
+        with open(profile_file, 'r') as f:
+            profile_data = json.load(f)
+        
+        roofer = RooferProfile.from_dict(profile_data)
+        
+        # Create quote object
+        quote_dict = data['quote']
+        if isinstance(quote_dict, dict) and 'address' in quote_dict and 'total' in quote_dict:
+            quote = QuoteResult(**quote_dict)
+        else:
+            # Calculate quote from property data
+            quote = calculate_quote(quote_dict, roofer)
+        
+        # Optional client info
+        client_name = data.get('client_name')
+        client_phone = data.get('client_phone')
+        client_email = data.get('client_email')
+        
+        # Generate PDF
+        output_dir = "pdfs"
+        
+        pdf_path = generate_pdf_for_quote(
+            quote=quote,
+            roofer=roofer,
+            output_dir=output_dir,
+            client_name=client_name,
+            client_phone=client_phone,
+            client_email=client_email,
+            roofer_phone=user.get('phone', 'N/A')
+        )
+        
+        # Ensure absolute path and verify file exists
+        pdf_path = os.path.abspath(pdf_path)
+        if not os.path.exists(pdf_path):
+            return jsonify({'error': f'PDF file not found at: {pdf_path}'}), 500
+        
+        # Return PDF file
+        return send_file(
+            pdf_path,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f"Roofing_Estimate_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        )
+        
+    except Exception as e:
+        print(f"Error generating PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/settings', methods=['GET'])
 @require_auth
@@ -2642,6 +2816,11 @@ TILEIT_DASHBOARD_TEMPLATE = """
                     </div>
                 </div>
                 
+                <div class="form-group">
+                    <label>Phone Number <span style="color: red;">*</span></label>
+                    <input type="tel" id="regPhone" placeholder="555-123-4567" required>
+                </div>
+                
                 <button class="btn btn-primary" onclick="register()" style="width: 100%;">Create Account</button>
             </div>
             
@@ -3363,11 +3542,12 @@ TILEIT_DASHBOARD_TEMPLATE = """
             const password = document.getElementById('regPassword').value;
             const licenseId = document.getElementById('regLicenseId').value.trim();
             const zipCode = document.getElementById('regZipCode').value.trim();
+            const phone = document.getElementById('regPhone').value.trim();
             const submitBtn = event ? event.target : document.querySelector('#registerForm .btn-primary');
             
             // Validation
-            if (!businessName || !email || !password || !licenseId || !zipCode) {
-                showToast('Please fill in all fields', 'error');
+            if (!businessName || !email || !password || !licenseId || !zipCode || !phone) {
+                showToast('Please fill in all fields including phone number', 'error');
                 return;
             }
             
@@ -3388,6 +3568,13 @@ TILEIT_DASHBOARD_TEMPLATE = """
                 return;
             }
             
+            // Phone validation (basic)
+            const phoneRegex = /^[\d\s\-\(\)]+$/;
+            if (!phoneRegex.test(phone) || phone.length < 10) {
+                showToast('Please enter a valid phone number', 'error');
+                return;
+            }
+            
             setButtonLoading(submitBtn, true);
             
             try {
@@ -3399,7 +3586,8 @@ TILEIT_DASHBOARD_TEMPLATE = """
                         email,
                         password,
                         license_id: licenseId,
-                        primary_zip_code: zipCode
+                        primary_zip_code: zipCode,
+                        phone: phone
                     })
                 });
                 
@@ -3781,6 +3969,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
                                 <td>${savedOn}</td>
                                 <td>
                                   <button class="btn btn-sm btn-primary" onclick="viewSavedQuoteDetails(${index})">View Details</button>
+                                  <button class="btn btn-sm btn-success" onclick="downloadPDF('${quote.id}')" style="margin-left: 8px;">📄 PDF</button>
                                   <button class="btn btn-sm btn-secondary" onclick="deleteSavedQuote('${quote.id}')" style="margin-left: 8px;">Delete</button>
                                 </td>
                               </tr>`;
@@ -3959,6 +4148,7 @@ TILEIT_DASHBOARD_TEMPLATE = """
         let currentPropertyData = null;
         let currentQuoteData = null;
         let savedQuotesArray = [];
+        let currentGeneratedQuotes = [];
         
         function showPropertyModal(property, quote) {
             // Store in global variables
@@ -4046,7 +4236,8 @@ TILEIT_DASHBOARD_TEMPLATE = """
                         </div>
                         <div class="modal-footer">
                             <button class="btn btn-secondary" onclick="closePropertyModal()">Close</button>
-                            <button class="btn btn-primary" onclick="saveCurrentQuote()">Save Quote</button>
+                            <button class="btn btn-success" onclick="downloadPDFFromModal()">📄 Download PDF</button>
+                            <button class="btn btn-primary" onclick="saveCurrentQuote()">💾 Save Quote</button>
                         </div>
                     </div>
                 </div>
@@ -4171,6 +4362,126 @@ TILEIT_DASHBOARD_TEMPLATE = """
                 console.error('Error deleting quote:', error);
                 showToast('Error deleting quote', 'error');
             }
+        }
+        
+        async function downloadPDF(quoteId, quoteData = null) {
+            try {
+                showToast('Generating PDF...', 'info');
+                
+                const url = `/api/quotes/${quoteId}/pdf`;
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {'Authorization': 'Bearer ' + authToken}
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({error: 'Failed to generate PDF'}));
+                    throw new Error(error.error || 'Failed to generate PDF');
+                }
+                
+                // Get PDF blob
+                const blob = await response.blob();
+                const url_blob = window.URL.createObjectURL(blob);
+                
+                // Create download link
+                const a = document.createElement('a');
+                a.href = url_blob;
+                a.download = `Roofing_Estimate_${quoteId}_${new Date().toISOString().split('T')[0]}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Cleanup
+                window.URL.revokeObjectURL(url_blob);
+                document.body.removeChild(a);
+                
+                showToast('PDF downloaded successfully!', 'success');
+            } catch (error) {
+                console.error('Error downloading PDF:', error);
+                showToast('Failed to download PDF: ' + error.message, 'error');
+            }
+        }
+        
+        async function downloadPDFFromData(quote, quoteId = null) {
+            try {
+                showToast('Generating PDF...', 'info');
+                
+                const response = await fetch('/api/quotes/generate-pdf', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + authToken,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        quote: quote
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({error: 'Failed to generate PDF'}));
+                    throw new Error(error.error || 'Failed to generate PDF');
+                }
+                
+                // Get PDF blob
+                const blob = await response.blob();
+                const url_blob = window.URL.createObjectURL(blob);
+                
+                // Create download link
+                const a = document.createElement('a');
+                a.href = url_blob;
+                const address = quote.address || 'quote';
+                const safeAddress = address.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
+                a.download = `Roofing_Estimate_${safeAddress}_${new Date().toISOString().split('T')[0]}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Cleanup
+                window.URL.revokeObjectURL(url_blob);
+                document.body.removeChild(a);
+                
+                showToast('PDF downloaded successfully!', 'success');
+            } catch (error) {
+                console.error('Error downloading PDF:', error);
+                showToast('Failed to download PDF: ' + error.message, 'error');
+            }
+        }
+        
+        async function downloadPDFFromIndex(index) {
+            // Get quotes from the global array
+            if (!currentGeneratedQuotes || !currentGeneratedQuotes[index]) {
+                showToast('Quote not found', 'error');
+                return;
+            }
+            
+            await downloadPDFFromData(currentGeneratedQuotes[index], index);
+        }
+        
+        async function downloadPDFFromModal() {
+            if (!currentPropertyData || !currentQuoteData) {
+                showToast('No quote data available', 'error');
+                return;
+            }
+            
+            // Combine property and quote data into a QuoteResult-like object
+            const quoteForPDF = {
+                address: currentPropertyData.address || 'Unknown Address',
+                roof_material: currentPropertyData.roof_material || 'asphalt',
+                pitch: currentPropertyData.pitch || currentPropertyData.avg_pitch || 15,
+                estimated_quote_range: currentQuoteData.estimated_quote_range || `$${currentQuoteData.min_quote || 0} - $${currentQuoteData.max_quote || 0}`,
+                min_quote: currentQuoteData.min_quote || 0,
+                max_quote: currentQuoteData.max_quote || 0,
+                region_multiplier: currentQuoteData.region_multiplier || 1.0,
+                crew_size_used: currentQuoteData.crew_size_used || 3,
+                roof_area: currentPropertyData.roof_area || 0,
+                material_cost: currentQuoteData.material_cost || 0,
+                labor_cost: currentQuoteData.labor_cost || 0,
+                repair_cost: currentQuoteData.repair_cost || 0,
+                subtotal: currentQuoteData.subtotal || 0,
+                overhead: currentQuoteData.overhead || 0,
+                profit: currentQuoteData.profit || 0,
+                total: currentQuoteData.total || (currentQuoteData.min_quote || 0)
+            };
+            
+            await downloadPDFFromData(quoteForPDF);
         }
         
         function applyFilters() {
@@ -4647,6 +4958,9 @@ TILEIT_DASHBOARD_TEMPLATE = """
         function displayQuotes(quotes) {
             const container = document.getElementById('quotesTable');
             
+            // Store quotes globally for PDF download
+            currentGeneratedQuotes = quotes || [];
+            
             if (!quotes || quotes.length === 0) {
                 container.innerHTML = '<div class="loading">No quotes generated yet. Click "Generate All Quotes" to create quotes.</div>';
                 document.getElementById('totalQuotesCount').textContent = '0';
@@ -4672,17 +4986,21 @@ TILEIT_DASHBOARD_TEMPLATE = """
                             <th>Pitch (°)</th>
                             <th>Crew Size</th>
                             <th>Quote Range</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${quotes.map(quote => `
-                            <tr onclick="showQuoteDetails('${quote.address.replace(/'/g, "\\'")}')">
-                                <td><a href="#" class="property-link">${quote.address || 'N/A'}</a></td>
-                                <td>${quote.roof_material || 'N/A'}</td>
-                                <td>${quote.roof_area ? quote.roof_area.toFixed(0) : 'N/A'}</td>
-                                <td>${quote.pitch ? quote.pitch.toFixed(1) : 'N/A'}</td>
-                                <td>${quote.crew_size_used || 'N/A'}</td>
-                                <td><strong>${quote.estimated_quote_range}</strong></td>
+                        ${quotes.map((quote, index) => `
+                            <tr>
+                                <td onclick="showQuoteDetails('${quote.address.replace(/'/g, "\\'")}')"><a href="#" class="property-link">${quote.address || 'N/A'}</a></td>
+                                <td onclick="showQuoteDetails('${quote.address.replace(/'/g, "\\'")}')">${quote.roof_material || 'N/A'}</td>
+                                <td onclick="showQuoteDetails('${quote.address.replace(/'/g, "\\'")}')">${quote.roof_area ? quote.roof_area.toFixed(0) : 'N/A'}</td>
+                                <td onclick="showQuoteDetails('${quote.address.replace(/'/g, "\\'")}')">${quote.pitch ? quote.pitch.toFixed(1) : 'N/A'}</td>
+                                <td onclick="showQuoteDetails('${quote.address.replace(/'/g, "\\'")}')">${quote.crew_size_used || 'N/A'}</td>
+                                <td onclick="showQuoteDetails('${quote.address.replace(/'/g, "\\'")}')"><strong>${quote.estimated_quote_range}</strong></td>
+                                <td>
+                                    <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); downloadPDFFromIndex(${index})">📄 PDF</button>
+                                </td>
                             </tr>
                         `).join('')}
                     </tbody>
