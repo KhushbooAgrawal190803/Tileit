@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Professional Roofing Quote - Tileit</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Left Side: Quote Display -->
+        <div class="quote-section">
+            <div class="quote-card">
+                <div class="quote-header">
+                    <h2>Your Roofing Quote</h2>
+                </div>
+                
+                <div class="property-info">
+                    <div class="info-item">
+                        <span class="label">Property Address:</span>
+                        <span class="value">52 Test Address, Godrics Hollow, TH 12345</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Roof Material:</span>
+                        <span class="value">Metal</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Roof Area:</span>
+                        <span class="value">330 sqft</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Pitch:</span>
+                        <span class="value">29.4°</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Crew Size:</span>
+                        <span class="value">6 workers</span>
+                    </div>
+                </div>
+                
+                <div class="cost-breakdown">
+                    <h3>Cost Breakdown</h3>
+                    <div class="breakdown-item">
+                        <span>Materials:</span>
+                        <span>$2,312</span>
+                    </div>
+                    <div class="breakdown-item">
+                        <span>Labor:</span>
+                        <span>$3,140</span>
+                    </div>
+                    <div class="breakdown-item">
+                        <span>Repairs:</span>
+                        <span>$509</span>
+                    </div>
+                    <div class="breakdown-item">
+                        <span>Overhead:</span>
+                        <span>$745</span>
+                    </div>
+                    <div class="breakdown-item">
+                        <span>Profit Margin:</span>
+                        <span>$1,639</span>
+                    </div>
+                </div>
+                
+                <div class="quote-total">
+                    <div class="total-label">Estimated Quote Range</div>
+                    <div class="total-amount">$8,852 - $11,311</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Right Side: Product Info & CTA -->
+        <div class="product-section">
+            <div class="product-content">
+                <h1>Professional Roofing Solutions</h1>
+                <p class="subtitle">Get accurate, transparent quotes for your roofing project</p>
+                
+                <div class="product-intro">
+                    <h2>Why Choose Tileit?</h2>
+                    <p>
+                        Tileit is a comprehensive roofing quote platform designed for roofing professionals 
+                        and property owners. Our advanced algorithm calculates precise estimates based on 
+                        real property data, material costs, labor rates, and regional pricing factors.
+                    </p>
+                    
+                    <ul class="features-list">
+                        <li>✓ Accurate quote calculations using advanced algorithms</li>
+                        <li>✓ Transparent cost breakdowns for materials, labor, and overhead</li>
+                        <li>✓ Regional pricing adjustments for fair estimates</li>
+                        <li>✓ Professional PDF reports for your records</li>
+                        <li>✓ Trusted by roofing professionals nationwide</li>
+                    </ul>
+                    
+                    <p>
+                        Whether you're a roofing contractor looking to streamline your quoting process 
+                        or a property owner seeking a reliable estimate, Tileit provides the tools and 
+                        transparency you need to make informed decisions about your roofing project.
+                    </p>
+                </div>
+                
+                <button class="buy-now-btn" onclick="openBuyNowForm()">
+                    Buy Now
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Buy Now Form Modal -->
+    <div id="buyNowModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeBuyNowForm()">&times;</span>
+            <h2>Complete Your Purchase</h2>
+            <form id="buyNowForm" onsubmit="handleBuyNow(event)">
+                <div class="form-group">
+                    <label for="email">Email Address <span class="required">*</span></label>
+                    <input type="email" id="email" name="email" required placeholder="your@email.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="zipcode">ZIP Code <span class="required">*</span></label>
+                    <input type="text" id="zipcode" name="zipcode" required placeholder="12345" pattern="[0-9]{5}" maxlength="5">
+                </div>
+                
+                <div class="form-group checkbox-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="marketing" name="marketing">
+                        <span>I'm okay with being reached out by the marketing and customer acquisition team</span>
+                    </label>
+                </div>
+                
+                <button type="submit" class="submit-btn">Complete Purchase</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Area Not Available Popup -->
+    <div id="areaPopup" class="popup-overlay">
+        <div class="popup-content">
+            <div class="popup-icon">⚠️</div>
+            <h2>Sorry! We are not in your area yet.</h2>
+            <p>We'll notify you when we are.</p>
+            <button class="popup-btn" onclick="closeAreaPopup()">OK</button>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
+
